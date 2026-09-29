@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#8fd6e6">
+<meta name="author" content="nengmao">
 <title>PCG 小岛 · Low Poly Town</title>
 <style>
   :root {
@@ -70,6 +71,9 @@
   #brushDot { width: 40px; height: 40px; display: grid; place-items: center; }
   #brushDot i { display: block; border-radius: 50%; border: 2px solid var(--accent); background: rgba(255,255,255,.55); transition: width .08s, height .08s; }
   #brush b { display: block; color: var(--ink); font-size: 14px; }
+  #sig { position: fixed; left: 50%; top: 22px; transform: translateX(-50%); font-size: 13px; letter-spacing: 2px;
+    color: rgba(255,255,255,.95); text-shadow: 0 1px 3px rgba(20,60,80,.5), 0 1px 10px rgba(20,60,80,.45); pointer-events: none; white-space: nowrap; }
+  #sig b { font-weight: 600; letter-spacing: 3px; }
   #toast { position: fixed; left: 50%; top: 18%; transform: translate(-50%, 0); font-size: 46px; font-weight: 700; color: #fff; letter-spacing: 6px;
     text-shadow: 0 3px 18px rgba(20,60,80,.45); opacity: 0; pointer-events: none; transition: opacity .5s, transform .5s; }
   #toast.show { opacity: 1; transform: translate(-50%, -8px); transition: opacity .15s, transform .15s; }
@@ -106,6 +110,7 @@
     #brushDot { display: none; }
     #brushSlider { flex: 1; width: auto; min-width: 0; }
     #hint { bottom: calc(84px + env(safe-area-inset-bottom)); }
+    #sig { left: calc(12px + env(safe-area-inset-left)); top: calc(64px + env(safe-area-inset-top)); transform: none; font-size: 11.5px; letter-spacing: 1px; }
     #toast { font-size: 34px; top: 22%; }
   }
   body.touch input[type=range] { height: 12px; }
@@ -168,6 +173,7 @@
   </div>
 </div>
 <div id="hint">单指画地块 · 双指缩放 / 旋转 / 平移</div>
+<div id="sig">by <b>nengmao</b></div>
 
 <div id="toast"></div>
 <div id="dbg"></div>
