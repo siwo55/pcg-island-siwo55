@@ -17,8 +17,11 @@
 
   function init() {
     const canvas = $('c');
+    // touch screens: lighter render settings and touch controls (?touch=1 forces it on a desktop)
+    const coarse = P.get('touch') === '1' || !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    if (coarse) document.body.classList.add('touch');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     const scene = new THREE.Scene();
@@ -29,7 +32,7 @@
     const grid = Grid.generate(gridSeed, 11, 2);
     const world = new World(scene, grid, islandSeed);
     const rig = new CameraRig(camera);
-    const env = new Env(scene, renderer, camera, world);
+    const env = new Env(scene, renderer, camera, world, { shadowSize: coarse ? 1024 : 2048 });
     const birds = new Birds(scene, world);
     const boats = new Boats(scene, world);
     const particles = new Particles(scene, renderer, camera);
@@ -72,7 +75,8 @@
     // ---------------------------------------------------------------- island helpers
     function focusIsland() {
       const b = world.islandBounds();
-      rig.focus(b.x, b.z, b.r * 2.5 + 15);
+      const tanH = Math.tan(camera.fov * Math.PI / 360) * camera.aspect;
+      rig.focus(b.x, b.z, Math.max(b.r * 2.5 + 15, (b.r + 3) / tanH));
     }
     function randomIsland() {
       input.remember();
@@ -89,11 +93,13 @@
       world.clear();
     }
 
+    // the touch hint goes away for good on the first touch / when the panel opens
+    let hintOff = false;
+    function hideHint() { hintOff = true; $('hint').classList.remove('show'); }
+
     // ---------------------------------------------------------------- audio needs a user gesture
-    let audioStarted = false;
-    function startAudio() { if (!audioStarted) { audioStarted = true; audio.start(); } }
-    window.addEventListener('pointerdown', startAudio);
-    window.addEventListener('keydown', startAudio);
+    function startAudio() { audio.start(); }   // creates the context once, later calls just resume it
+    ['pointerdown', 'pointerup', 'touchend', 'keydown'].forEach((t) => window.addEventListener(t, startAudio, { passive: true }));
 
     const soundEl = $('sound');
     function toggleSound() {
@@ -103,6 +109,7 @@
       soundEl.classList.toggle('on2', !on);
     }
 
+    const brushSlider = $('brushSlider');
     const timeEl = $('time'), clockEl = $('clock'), pauseEl = $('pause'), speedEl = $('speed');
     function togglePause() { env.paused = !env.paused; pauseEl.textContent = env.paused ? '▶' : '⏸'; }
 
@@ -115,7 +122,13 @@
       onFocus: focusIsland,
       onBrush: showBrush,
       onHistory: () => quiet(900),
+      onTool: (t) => toolBtns.forEach((b) => b.classList.toggle('on', b.dataset.tool === t)),
+      onFirstInput: hideHint,
     });
+    brushSlider.addEventListener('input', () => input.setRadius(+brushSlider.value));
+    const toolBtns = Array.from(document.querySelectorAll('button.tool[data-tool]'));
+    toolBtns.forEach((b) => b.addEventListener('click', () => input.setTool(b.dataset.tool)));
+    $('fold').addEventListener('click', () => { $('ctl').classList.toggle('open'); $('fold').blur(); hideHint(); });
     world.onPlace = () => { if (performance.now() > quietUntil) audio.place(); };
     world.onRemove = () => { if (performance.now() > quietUntil) audio.remove(); };
 
@@ -127,6 +140,7 @@
       $('brushVal').textContent = r.toFixed(1);
       const px = Util.clamp(6 + r * 5.6, 8, 38);
       const c = $('brushCircle'); c.style.width = c.style.height = px + 'px';
+      brushSlider.value = r;
     }
     showBrush(input.radius);
 
@@ -145,8 +159,9 @@
     soundEl.addEventListener('click', () => { toggleSound(); soundEl.blur(); });
     $('random').addEventListener('click', (e) => { randomIsland(); e.currentTarget.blur(); });
     $('clear').addEventListener('click', (e) => { clearIsland(); e.currentTarget.blur(); });
-    const undoEl = $('undo'), redoEl = $('redo');
+    const undoEl = $('undo'), redoEl = $('redo'), undo2El = $('undo2');
     undoEl.addEventListener('click', () => { input.doUndo(); undoEl.blur(); });
+    undo2El.addEventListener('click', () => { input.doUndo(); undo2El.blur(); });
     redoEl.addEventListener('click', () => { input.doRedo(); redoEl.blur(); });
 
     // ---------------------------------------------------------------- resize
@@ -157,7 +172,12 @@
       camera.fov = w / h < 1 ? 52 : 38;
       camera.updateProjectionMatrix();
     }
-    window.addEventListener('resize', resize);
+    let portrait = window.innerWidth < window.innerHeight;
+    window.addEventListener('resize', () => {
+      resize();
+      const p = window.innerWidth < window.innerHeight;
+      if (p !== portrait) { portrait = p; focusIsland(); }
+    });
     resize();
 
     // ---------------------------------------------------------------- start
@@ -206,11 +226,16 @@
       if (hs !== histState) {
         histState = hs;
         undoEl.disabled = !input.undo.length; redoEl.disabled = !input.redo.length;
-        undoEl.style.opacity = undoEl.disabled ? 0.45 : 1; redoEl.style.opacity = redoEl.disabled ? 0.45 : 1;
+        undoEl.style.opacity = undo2El.style.opacity = undoEl.disabled ? 0.45 : 1; redoEl.style.opacity = redoEl.disabled ? 0.45 : 1;
+        undo2El.disabled = undoEl.disabled;
       }
       audioT += dt;
       if (audioT > 0.4) { audioT = 0; audio.setState(env.season, env.night, env.wind); }
-      if (!loaded) { loaded = true; setTimeout(() => $('load').classList.add('hide'), 250); }
+      if (!loaded) {
+        loaded = true;
+        setTimeout(() => $('load').classList.add('hide'), 250);
+        if (coarse) { setTimeout(() => { if (!hintOff) $('hint').classList.add('show'); }, 900); setTimeout(hideHint, 9000); }
+      }
       if (dbg.style.display === 'block') {
         fpsAcc += dt; fpsN++;
         if (fpsAcc > 0.5) {

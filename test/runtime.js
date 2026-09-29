@@ -46,7 +46,7 @@ class Object3D {
   remove(o) { const i = this.children.indexOf(o); if (i >= 0) this.children.splice(i, 1); o.parent = null; return this; }
   traverse(f) { f(this); for (const c of this.children) c.traverse(f); }
   updateMatrixWorld() {}
-  lookAt() {}
+  lookAt(v) { this._look = v.clone(); }
 }
 class Group extends Object3D { constructor() { super(); this.isGroup = true; } }
 class Scene extends Object3D { constructor() { super(); this.fog = null; } }
@@ -92,7 +92,12 @@ class Mesh extends Object3D {
 class Sprite extends Object3D { constructor(m) { super(); if (!m) throw new Error('Sprite needs material'); this.material = m; } }
 class Raycaster {
   constructor() { this.ray = { origin: new Vector3(), direction: new Vector3() }; }
-  setFromCamera(c, cam) { this.ray.origin.copy(cam.position); this.ray.direction.set(c.x * 0.3, -0.8, -0.5 + c.y * 0.3).normalize(); }
+  setFromCamera(c, cam) {
+    // aim at what the camera looks at; the screen offset moves the ray sideways/forward a little
+    const L = cam._look || new Vector3(), o = cam.position;
+    this.ray.origin.copy(o);
+    this.ray.direction.set(L.x - o.x + c.x * 8, L.y - o.y, L.z - o.z - c.y * 8).normalize();
+  }
 }
 
 const drawn = { calls: 0 };
@@ -136,10 +141,11 @@ function el(id) {
 }
 const elems = {};
 const seasonBtns = ['spring', 'summer', 'autumn', 'winter'].map((s) => { const b = el('btn-' + s); b.dataset.s = s; return b; });
+const toolBtns = ['add', 'del', 'look'].map((t) => { const b = el('tool-' + t); b.dataset.tool = t; return b; });
 const document = {
   getElementById(id) { return elems[id] || (elems[id] = (id === 'c' ? Object.assign(el('c'), { width: 1400, height: 900, clientWidth: 1400, clientHeight: 900 }) : el(id))); },
   createElement(tag) { return el(tag); },
-  querySelectorAll() { return seasonBtns; },
+  querySelectorAll(sel) { return /tool/.test(sel) ? toolBtns : seasonBtns; },
   body: Object.assign(el('body'), { classList: el('x').classList }),
 };
 const win = {
@@ -147,7 +153,7 @@ const win = {
   addEventListener(t, f) { (listeners['window:' + t] = listeners['window:' + t] || []).push(f); },
 };
 let rafCb = null;
-const query = process.argv[2] || '?season=summer&instant=1&debug=1&seed=12345';
+const query = process.argv[2] || '?season=summer&instant=1&debug=1&seed=12345&touch=1';
 const sandbox = {
   THREE, document, window: win, location: { search: query }, URLSearchParams, console, Math, Float32Array, Int16Array, Int32Array, Uint8Array, Uint8ClampedArray,
   Uint16Array, Uint32Array, Map, Set, JSON, Date, Array, Object, Number, String, Promise, Infinity, isFinite, isNaN, parseFloat, parseInt,
@@ -242,4 +248,73 @@ check('keyboard handled', app.world.season === 'winter');
 for (const id of ['random', 'clear', 'undo', 'redo', 'pause', 'speed', 'sound']) (listeners[id + ':click'] || []).forEach((f) => f({ currentTarget: elems[id] || el(id), target: elems[id] || el(id) }));
 step(120);
 check('buttons handled', true, 'land ' + w.landCount());
+// ---------------------------------------------------------------- touch
+{
+  const tfire = (type, id, x, y) => fire(type, { pointerType: 'touch', pointerId: id, clientX: x, clientY: y, button: 0 });
+  check('touch class set', document.body.classList.contains('touch'));
+  app.world.clear(); step(60);
+  app.input.setTool('add');
+  tfire('pointerdown', 1, 700, 450);
+  for (let i = 0; i < 10; i++) { tfire('pointermove', 1, 700 + i * 12, 450); step(1); }
+  tfire('pointerup', 1, 820, 450); step(60);
+  const tp = w.landCount();
+  check('touch paint', tp > 3 && app.input.undo.length >= 1, tp + ' cells');
+  check('touch ring hidden after lift', app.input.inside === false);
+
+  const g0 = { d: app.rig.gdist, y: app.rig.gyaw, x: app.rig.gt.x, z: app.rig.gt.z };
+  // pinch out
+  tfire('pointerdown', 1, 600, 450); tfire('pointerdown', 2, 800, 450);
+  tfire('pointermove', 2, 900, 450); tfire('pointermove', 1, 500, 450);
+  check('pinch out zooms in', app.rig.gdist < g0.d, g0.d.toFixed(1) + ' -> ' + app.rig.gdist.toFixed(1));
+  // twist: rotate the pair clockwise by moving finger 2 downward
+  const yaw1 = app.rig.gyaw;
+  tfire('pointermove', 2, 900, 550);
+  check('twist rotates', app.rig.gyaw !== yaw1, yaw1.toFixed(2) + ' -> ' + app.rig.gyaw.toFixed(2));
+  // pan: both fingers move right
+  const gx = app.rig.gt.x, gz = app.rig.gt.z;
+  tfire('pointermove', 1, 560, 450); tfire('pointermove', 2, 960, 550);
+  check('two-finger pan moves target', app.rig.gt.x !== gx || app.rig.gt.z !== gz);
+  // lifting one finger must not start painting with the other
+  const before = w.landCount();
+  tfire('pointerup', 1, 560, 450);
+  tfire('pointermove', 2, 700, 300); step(30);
+  tfire('pointerup', 2, 700, 300); step(30);
+  check('gesture never paints', w.landCount() === before && !app.input.mode);
+  check('gesture state cleared', app.input.touches.size === 0 && app.input.drag === null && !app.input.locked);
+
+  // second finger arriving right after the first cancels the tentative stroke
+  const undoN = app.input.undo.length, cells0 = w.landCount();
+  tfire('pointerdown', 1, 300, 450);
+  tfire('pointerdown', 2, 400, 450); step(30);
+  tfire('pointerup', 1, 300, 450); tfire('pointerup', 2, 400, 450); step(30);
+  check('accidental stroke discarded', w.landCount() === cells0 && app.input.undo.length === undoN, w.landCount() + ' vs ' + cells0);
+
+  // erase tool
+  app.input.setTool('del');
+  const land1 = w.landCount();
+  tfire('pointerdown', 1, 700, 450); tfire('pointermove', 1, 760, 450); tfire('pointerup', 1, 760, 450); step(60);
+  check('touch erase', w.landCount() < land1, land1 + ' -> ' + w.landCount());
+  check('tool button state', toolBtns.find((b) => b.dataset.tool === 'del').classList.contains('on'));
+
+  // look tool rotates with one finger
+  app.input.setTool('look');
+  const yaw2 = app.rig.gyaw, land2 = w.landCount();
+  tfire('pointerdown', 1, 500, 400); tfire('pointermove', 1, 560, 420); tfire('pointerup', 1, 560, 420); step(5);
+  check('look tool rotates', app.rig.gyaw !== yaw2 && w.landCount() === land2);
+
+  // brush slider
+  elems.brushSlider.value = '4';
+  (listeners['brushSlider:input'] || []).forEach((f) => f({}));
+  check('brush slider', Math.abs(app.input.radius - 4) < 1e-6 && elems.brushVal.textContent === '4.0', app.input.radius);
+  // fold button
+  (listeners['fold:click'] || []).forEach((f) => f({}));
+  check('fold toggles panel', elems.ctl.classList.contains('open'));
+  // portrait framing fits the island width
+  win.innerWidth = 390; win.innerHeight = 844;
+  (listeners['window:resize'] || []).forEach((f) => f({})); app.randomIsland(); step(30);
+  const b = w.islandBounds(), tanH = Math.tan(app.camera.fov * Math.PI / 360) * app.camera.aspect;
+  check('portrait aspect', app.camera.aspect < 0.5 && app.camera.fov > 45, app.camera.aspect.toFixed(2));
+  check('portrait island fits', app.rig.gdist >= (b.r + 3) / tanH - 0.01 || app.rig.gdist >= 92, 'dist ' + app.rig.gdist.toFixed(1) + ' need ' + ((b.r + 3) / tanH).toFixed(1));
+  check('fog pushed back when zoomed out', app.scene.fog.near > 42, 'near ' + app.scene.fog.near.toFixed(0) + ' far ' + app.scene.fog.far.toFixed(0));
+}
 console.log('total frames', drawn.calls, ' pending', w.pending.size, ' active', w.active.size);

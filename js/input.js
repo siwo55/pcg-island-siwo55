@@ -16,20 +16,23 @@ class CameraRig {
     this.gyaw -= dx * 0.0055;
     this.gpitch = Util.clamp(this.gpitch + dy * 0.0045, 0.2, 1.42);
   }
-  pan(dx, dy) {
-    const s = this.dist * 0.0017, sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+  // `s` is world units per pixel (mouse default is a bit faster than 1:1; touch passes an exact value)
+  pan(dx, dy, s) {
+    if (s === undefined) s = this.dist * 0.0017;
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     this.gt.x += -dx * s * cy + dy * s * -sy;
     this.gt.z += dx * s * sy + dy * s * -cy;
     this.clampTarget();
   }
-  zoom(dir) { this.gdist = Util.clamp(this.gdist * Math.exp(dir * 0.1), 9, 78); }
+  zoom(dir) { this.zoomBy(Math.exp(dir * 0.1)); }
+  zoomBy(f) { this.gdist = Util.clamp(this.gdist * f, 9, CameraRig.MAX_DIST); }
   clampTarget() {
     const m = 22, l = Math.hypot(this.gt.x, this.gt.z);
     if (l > m) { this.gt.x *= m / l; this.gt.z *= m / l; }
   }
   focus(x, z, dist) {
     this.gt.set(x, 0.5, z); this.clampTarget();
-    if (dist) this.gdist = Util.clamp(dist, 9, 78);
+    if (dist) this.gdist = Util.clamp(dist, 9, CameraRig.MAX_DIST);
   }
   update(dt) {
     const k = dt > 0 ? 1 - Math.exp(-dt * 11) : 1;
@@ -61,10 +64,17 @@ class CameraRig {
   }
 }
 
+CameraRig.MAX_DIST = 92;
+
 class Input {
   constructor(dom, camera, scene, world, rig, hooks) {
     this.dom = dom; this.camera = camera; this.scene = scene; this.world = world; this.rig = rig; this.hooks = hooks || {};
     this.radius = 2.4;
+    this.tool = 'add';           // what one finger does on a touch screen: 'add' | 'del' | 'look'
+    this.touches = new Map();    // active touch pointers -> {x, y}
+    this.gesture = null;         // last two-finger state {d, ang, cx, cy}
+    this.locked = false;         // after a two-finger gesture the remaining finger is ignored until all are up
+    this.touchT0 = 0;
     this.mode = null;            // 'add' | 'del' while a stroke is active
     this.drag = null;            // 'rotate' | 'pan' while a camera drag is active
     this.mx = -1; this.my = -1; this.inside = false;
@@ -109,7 +119,10 @@ class Input {
     d.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     window.addEventListener('keydown', (e) => this.onKey(e, true));
     window.addEventListener('keyup', (e) => this.onKey(e, false));
-    window.addEventListener('blur', () => { this.rig.keys.clear(); this.endStroke(); this.drag = null; });
+    window.addEventListener('blur', () => {
+      this.rig.keys.clear(); this.endStroke(); this.drag = null;
+      this.touches.clear(); this.gesture = null; this.locked = false;
+    });
   }
 
   setPointer(e) {
@@ -134,6 +147,7 @@ class Input {
     this.setPointer(e);
     try { this.dom.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     if (this.hooks.onFirstInput) this.hooks.onFirstInput();
+    if (e.pointerType === 'touch') { this.touchDown(e); return; }
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       this.drag = e.shiftKey ? 'pan' : 'rotate';
       this.px = e.clientX; this.py = e.clientY;
@@ -149,6 +163,7 @@ class Input {
 
   onMove(e) {
     this.setPointer(e);
+    if (e.pointerType === 'touch') { this.touchMove(e); return; }
     if (this.drag) {
       const dx = e.clientX - this.px, dy = e.clientY - this.py;
       this.px = e.clientX; this.py = e.clientY;
@@ -160,8 +175,78 @@ class Input {
 
   onUp(e) {
     try { this.dom.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    if (e.pointerType === 'touch') { this.touchUp(e); return; }
     this.drag = null;
     this.endStroke();
+  }
+
+  // ---------------------------------------------------------------- touch
+  // one finger: paint / erase / rotate depending on the selected tool; two fingers: pinch = zoom,
+  // twist = rotate, drag = pan (whatever the tool)
+  setTool(t) {
+    this.tool = t;
+    if (this.hooks.onTool) this.hooks.onTool(t);
+  }
+
+  touchDown(e) {
+    this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.touches.size >= 2) {
+      // a second finger means camera gesture: throw away a stroke that only just started
+      if (this.mode && performance.now() - this.touchT0 < 350) {
+        this.world.restore(this.strokeSnap);
+        this.mode = null; this.strokeSnap = null; this.last = null;
+      } else this.endStroke();
+      this.locked = true;
+      this.drag = 'gesture';
+      this.gesture = this.pair();
+      return;
+    }
+    this.locked = false;
+    this.touchT0 = performance.now();
+    if (this.tool === 'look') { this.drag = 'rotate'; return; }
+    this.mode = this.tool === 'del' ? 'del' : 'add';
+    this.strokeSnap = this.world.snapshot();
+    this.last = null;
+    this.stroke();
+  }
+
+  touchMove(e) {
+    const t = this.touches.get(e.pointerId);
+    if (!t) return;
+    const dx = e.clientX - t.x, dy = e.clientY - t.y;
+    t.x = e.clientX; t.y = e.clientY;
+    if (this.touches.size >= 2) { this.updateGesture(); return; }
+    if (this.locked) return;
+    if (this.drag === 'rotate') this.rig.rotate(dx, dy);
+    else if (this.mode) this.stroke();
+  }
+
+  touchUp(e) {
+    this.touches.delete(e.pointerId);
+    if (this.touches.size >= 2) { this.gesture = this.pair(); return; }
+    this.gesture = null;
+    if (this.touches.size === 1) return;      // keep ignoring the last finger until it lifts too
+    this.locked = false;
+    this.drag = null;
+    this.endStroke();
+    this.inside = false;
+  }
+
+  pair() {
+    const it = this.touches.values(), a = it.next().value, b = it.next().value;
+    return { d: Math.hypot(b.x - a.x, b.y - a.y) || 1, ang: Math.atan2(b.y - a.y, b.x - a.x), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+  }
+
+  updateGesture() {
+    const g = this.gesture || (this.gesture = this.pair()), n = this.pair();
+    this.rig.zoomBy(g.d / n.d);
+    let da = n.ang - g.ang;
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    this.rig.gyaw += da;
+    const h = this.dom.getBoundingClientRect().height || 800;
+    this.rig.pan(n.cx - g.cx, n.cy - g.cy, 2 * this.rig.dist * Math.tan(this.camera.fov * Math.PI / 360) / h);
+    this.gesture = n;
   }
 
   stroke() {

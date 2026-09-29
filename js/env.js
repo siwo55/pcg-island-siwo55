@@ -2,7 +2,8 @@
 // Environment: sky, sea, sun/moon lighting, day-night cycle, stars, clouds.
 // (Birds, boats and seasonal particles live in life.js.)
 class Env {
-  constructor(scene, renderer, camera, world) {
+  constructor(scene, renderer, camera, world, opts = {}) {
+    this.opts = opts;
     this.scene = scene; this.renderer = renderer; this.camera = camera; this.world = world;
     this.time = 0.36;            // 0..1, 0.25 sunrise, 0.5 noon, 0.75 sunset
     this.paused = false;
@@ -41,7 +42,8 @@ class Env {
     this.sun = new THREE.DirectionalLight(0xffffff, 2.4);
     this.sun.castShadow = true;
     const s = this.sun.shadow;
-    s.mapSize.set(2048, 2048);
+    const ms = this.opts.shadowSize || 2048;
+    s.mapSize.set(ms, ms);
     const r = ext * 0.72;
     Object.assign(s.camera, { left: -r, right: r, top: r, bottom: -r, near: 5, far: 200 });
     s.camera.updateProjectionMatrix();
@@ -286,11 +288,14 @@ class Env {
     this.stars.position.copy(this.camera.position);
     this.starMat.opacity = Util.smoothstep(0.55, 0.95, S.night);
     this.scene.fog.color.copy(S.hor);
+    // zooming out (portrait phones need to) pushes the fog back so the island does not wash out
+    const zs = Math.max(1, Math.hypot(this.camera.position.x - target.x, this.camera.position.y - target.y, this.camera.position.z - target.z) / 40), fNear = 42 * zs, fFar = Math.max(fNear + 40, Math.min(125 * zs, 135));
+    this.scene.fog.near = fNear; this.scene.fog.far = fFar;
     this.renderer.setClearColor(S.hor, 1);
 
     // water
     const wu = this.waterMat.uniforms;
-    wu.uTime.value = this.clock;
+    wu.uTime.value = this.clock; wu.uFogNear.value = fNear; wu.uFogFar.value = fFar;
     wu.uDeep.value.copy(c.deep); wu.uShallow.value.copy(c.shallow); wu.uFoamCol.value.copy(c.foam);
     wu.uAmb.value.copy(S.hSky).lerp(S.hGnd, 0.15).multiplyScalar(S.hI / Math.PI);
     wu.uSun.value.copy(S.sun).multiplyScalar(S.sunI / Math.PI);
