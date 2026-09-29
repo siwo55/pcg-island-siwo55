@@ -105,13 +105,12 @@
     function toggleSound() {
       startAudio();
       const on = audio.toggle();
-      soundEl.textContent = on ? '🔊' : '🔇';
-      soundEl.classList.toggle('on2', !on);
+      soundEl.classList.toggle('muted', !on);
     }
 
     const brushSlider = $('brushSlider');
     const timeEl = $('time'), clockEl = $('clock'), pauseEl = $('pause'), speedEl = $('speed');
-    function togglePause() { env.paused = !env.paused; pauseEl.textContent = env.paused ? '▶' : '⏸'; }
+    function togglePause() { env.paused = !env.paused; pauseEl.classList.toggle('paused', env.paused); }
 
     // ---------------------------------------------------------------- input
     const input = new Input(canvas, camera, scene, world, rig, {
@@ -154,7 +153,7 @@
     let speedIdx = 0;
     speedEl.addEventListener('click', () => {
       speedIdx = (speedIdx + 1) % SPEEDS.length; env.speed = SPEEDS[speedIdx];
-      speedEl.textContent = '速度 ×' + SPEEDS[speedIdx]; speedEl.blur();
+      $('speedTxt').textContent = '速度 ×' + SPEEDS[speedIdx]; speedEl.blur();
     });
     soundEl.addEventListener('click', () => { toggleSound(); soundEl.blur(); });
     $('random').addEventListener('click', (e) => { randomIsland(); e.currentTarget.blur(); });
@@ -184,7 +183,7 @@
     world.randomIsland(islandSeed);
     world.rezone({ origin: [0, 0] });
     if (P.has('time')) env.time = +P.get('time');
-    if (P.get('pause') === '1') { env.paused = true; pauseEl.textContent = '▶'; }
+    if (P.get('pause') === '1') { env.paused = true; pauseEl.classList.add('paused'); }
     if (P.has('speed')) env.speed = +P.get('speed');
     focusIsland();
     if (P.has('yaw')) rig.yaw = rig.gyaw = +P.get('yaw');
@@ -226,7 +225,6 @@
       if (hs !== histState) {
         histState = hs;
         undoEl.disabled = !input.undo.length; redoEl.disabled = !input.redo.length;
-        undoEl.style.opacity = undo2El.style.opacity = undoEl.disabled ? 0.45 : 1; redoEl.style.opacity = redoEl.disabled ? 0.45 : 1;
         undo2El.disabled = undoEl.disabled;
       }
       audioT += dt;
