@@ -2,15 +2,24 @@
 
 一个在浏览器里运行的 low poly 程序化小岛编辑器。在海上画出不规则地块，程序会自动在上面生成小镇：彩色房屋、广场、田地、森林、沙滩、码头，以及白塔、教堂、风车、灯塔等地标。支持春夏秋冬切换和昼夜循环，海鸥、帆船、云、季节粒子和合成环境音让小岛保持生机。
 
+界面是半透明磨砂玻璃面板加线条 SVG 图标，电脑（鼠标）和手机 / 平板（触屏）共用同一个页面，自动适配。
+
 纯 HTML + JavaScript，基于 [three.js](https://threejs.org/) r158，没有构建步骤。
 
-## 运行
+作者：nengmao
 
-1. 下载 three.js r158 的 `build/three.min.js`，放到 `lib/three.min.js`：
-   <https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js>
-2. 双击 `index.html` 打开。
+## 在线体验
 
-没有本地 `lib/three.min.js` 时，页面会自动从 jsdelivr / unpkg 在线加载（需要联网）。
+<https://siwo55.github.io/pcg-island-siwo55/>
+
+电脑和手机打开的是同一个链接。（需要在仓库 Settings → Pages 里把 Source 设为 `main` 分支的根目录。）
+
+## 本地运行
+
+直接双击 `index.html` 即可，联网时页面会自动从 jsdelivr / unpkg 加载 three.js。
+
+要完全离线使用，把 three.js r158 的 `build/three.min.js` 下载到 `lib/three.min.js`（仓库里不带这个文件）：
+<https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js>
 
 ## 操作
 
@@ -44,7 +53,7 @@
 | 撤销 | 右上角撤销按钮 |
 | 时间、速度、音效、随机、清空 | 底部右侧的设置按钮展开 |
 
-手机上会降低渲染像素比（≤1.5）和阴影贴图分辨率（1024）；竖屏时相机自动拉远，让整座岛入镜。
+手机上会降低渲染像素比（≤1.5）、阴影贴图分辨率（1024）和面板的模糊强度；竖屏时相机自动拉远，让整座岛入镜。
 
 ## URL 参数
 
@@ -57,11 +66,13 @@
 - `instant=1`：跳过弹出动画
 - `debug=1`：显示帧率和 draw call
 - `touch=1`：强制使用触控界面
+- `shot=1`：隐藏所有面板（截图用）
 
 ## 代码结构
 
 | 文件 | 内容 |
 | --- | --- |
+| `index.html` | 页面、玻璃质感样式、内嵌 SVG 图标、脚本加载 |
 | `js/util.js` | 带种子的随机数、哈希、噪声、缓动 |
 | `js/grid.js` | 不规则四边形网格（六边形剖分 → 随机合并 → 细分 → 松弛） |
 | `js/palette.js` | 四季配色 |
@@ -81,3 +92,5 @@
 node test/smoke.js     # 网格、分区、模型生成
 node test/runtime.js   # 用 three.js 桩跑完整程序：画地块、删除、撤销、四季、昼夜、触屏手势
 ```
+
+测试不涉及 WebGL，只检查逻辑和数值，画面效果需要在浏览器里看。
